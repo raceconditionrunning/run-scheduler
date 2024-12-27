@@ -17,7 +17,7 @@ from clorm.clingo import Control
 from run_scheduler.domain import Day, SlotAssignment, Exchange, Route, RouteDescent, Objective, \
     RouteAscent, Ascent, Descent, make_standard_func_ctx, \
     PreferredDistanceK, DayDistRangeK, RouteDistanceK, DistancePrecision, DurationPrecision
-from run_scheduler.routes import load_routes_from_dir, routes_to_facts, load_exchanges
+from run_scheduler.routes import load_routes_from_dir, routes_to_facts, load_exchanges, load_routes_from_table
 from run_scheduler.schedule import schedule_to_str
 
 
@@ -74,6 +74,7 @@ def save_solution(passthrough_args, out_dir, start_time, event_name="", file_nam
 def main(args):
     season = args.season
     routes_dir = args.routes_dir
+    routes_table = args.routes_table
     save_ground_model = args.save_ground_program
     save_all_models = args.save_all_models
     event_name = season
@@ -96,9 +97,16 @@ def main(args):
     # You can supply a bundle of geojson routes and we'll
     # turn them into facts. Otherwise, all the facts
     # need to be in an .lp file in the folder.
-    if os.path.isdir(routes_dir):
-        legs = load_routes_from_dir(routes_dir)
-        exchanges = load_exchanges(args.exchanges)
+    if routes_dir:
+        # Load metadata from the compiled routes table
+        legs = load_routes_from_table(routes_table.expanduser())
+        # Add coordinates from geojson files
+        coordinates = load_routes_from_dir(routes_dir.expanduser())
+        for item in coordinates:
+            for leg in legs:
+                if leg["id"] == item["id"]:
+                    leg["coordinates"] = item["coordinates"]
+        exchanges = load_exchanges(args.exchanges.expanduser())
         facts = routes_to_facts(legs, exchanges,distance_precision=args.distance_precision,
                                 duration_precision=args.duration_precision)
         facts += [DistancePrecision(str(args.distance_precision)), DurationPrecision(str(args.duration_precision))]
@@ -159,6 +167,7 @@ if __name__ == "__main__":
     asp_subdir_paths = glob.glob("*/*.lp")
     subdirs = set([str(pathlib.Path(p).parent) for p in asp_subdir_paths])
     parser.add_argument("season", choices=subdirs, help="Path to directory containing season-specific .lp files")
+    parser.add_argument("routes_table", type=pathlib.Path, help="Path to YAML file of route data")
     parser.add_argument("routes_dir", type=pathlib.Path, help="Path to directory containing route geojson files")
     parser.add_argument("exchanges", type=pathlib.Path, help="Path to file containing exchange metadata")
     parser.add_argument("--out-dir", type=pathlib.Path, help="Path to directory to save solutions")
