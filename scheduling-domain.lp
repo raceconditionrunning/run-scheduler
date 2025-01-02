@@ -32,3 +32,17 @@ twoAssignmentCount(Count) :- Count = #count { Day : twoAssignmentDay(Day) }.
 
 % Target 1:2 ratio of 1 index to 2 index slots
 #minimize { |OneCount * 2 - TwoCount| @Weight : oneAssignmentCount(OneCount), twoAssignmentCount(TwoCount), objective(Weight, "split-route-mix") }.
+
+% Prefer easy to get to places
+#minimize { Reachability@Weight, Day, Slot, 1 : reachability(Start, Reachability), routeStart(Route, Start), slotAssignment(Day, Slot, Route), objective(Weight, "reachability") }.
+#minimize { Reachability@Weight, Day, Slot, 2 : reachability(End, Reachability), routeEnd(Route, End), slotAssignment(Day, Slot, Route), objective(Weight, "reachability") }.
+
+
+% Visit a lot of places
+#maximize { 1@Weight, CoarseNeighborhood : coarseNeighborhood(Start, CoarseNeighborhood), slotAssignment(Day, Slot, Route), objective(Weight, "coarse-neighborhood-visitation") }.
+
+% Penalize long routes slotted after short routes, proportional to the difference in distance
+#minimize { Distance2 - Distance1@Weight, Day : slotAssignment(Day, Slot, Route1), slotAssignment(Day, Slot + 1, Route2), routeStart(Route2, Start2), routeDistance(Route1, Distance1), routeDistance(Route2, Distance2), Distance1 < Distance2, objective(Weight, "short-after-long") }.
+
+% Prefer routes that haven't been run recently (lastRun/2 is higher for more recent runs)
+#minimize { LastRun@Weight, Day, Slot : slotAssignment(Day, Slot, Route), lastRun(Route, LastRun), objective(Weight, "route-recency") }.
