@@ -13,11 +13,13 @@ Get a working installation of [Clingo](https://github.com/potassco/clingo) >=5.5
 
 For Apple Silicon Macs, use Homebrew and ensure you install cffi in the correct version of Python, e.g. `python3.12 -m pip install cffi`.
 
-Specify your problem matching the format used in `24-autumn/schedule.lp`. 
+You need a fully built copy of the [Race Condition Running website](https://github.com/raceconditionrunning/raceconditionrunning.github.io), which includes tables of routes and locations.
 
-Now:
+Specify your problem matching the format used in any of the `schedules/*.lp`. 
 
-    ./solve.py ../geojson ../../locs/db.csv 24-autumn
+Now, using the correct paths for the routes and locations files/directories:
+
+    ./solve.py 25_winter routes.yml routes/geojson/ locations.geojson 
 
 Solutions will stream into a timestamped folder in `solutions/`. By default, all optimal solutions are saved.
 

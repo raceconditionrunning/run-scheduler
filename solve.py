@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 
 import argparse
+import csv
 import datetime
-import glob
 import json
 import os
 import pathlib
@@ -18,7 +18,7 @@ from run_scheduler.domain import Day, SlotAssignment, Exchange, Route, RouteDesc
     RouteAscent, Ascent, Descent, make_standard_func_ctx, \
     PreferredDistanceK, DayDistRangeK, RouteDistanceK, DistancePrecision, DurationPrecision
 from run_scheduler.routes import load_routes_from_dir, routes_to_facts, load_exchanges, load_routes_from_table
-from run_scheduler.schedule import schedule_to_str
+from run_scheduler.schedule import schedule_to_str, schedule_to_rows
 
 
 def extract_schedule(facts: clorm.FactBase, distance_precision: float, duration_precision: float):
@@ -53,18 +53,21 @@ def extract_schedule(facts: clorm.FactBase, distance_precision: float, duration_
     return schedule
 
 
-def save_solution(passthrough_args, out_dir, start_time, event_name="", file_name="solution", atoms=None):
+def save_solution(passthrough_args, start_time, event_name="", file_name="solution", atoms=None):
     out = {**passthrough_args}
     out["startTime"] = start_time.isoformat()
     out["foundTime"] = datetime.datetime.now().isoformat()
     out["computeTime"] = (datetime.datetime.now() - start_time).total_seconds()
-
+    out_dir = f"solutions/{event_name}_{start_time.isoformat().replace(':', '_')}"
     # Create solutions directory if it doesn't exist
     if not os.path.exists(out_dir):
         os.makedirs(out_dir)
     with open(f"{out_dir}/{file_name}.json", "w") as f:
         json.dump(out, f, indent=2)
-
+    with open(f"{out_dir}/{file_name}.csv", "w") as f:
+        rows = schedule_to_rows(out["schedule"])
+        writer = csv.writer(f)
+        writer.writerows(rows)
     if atoms:
         with open(f"{out_dir}/{file_name}.lp", "w") as f:
             for atom in atoms:
@@ -88,10 +91,9 @@ def main(args):
     ctrl.configuration.solve.parallel_mode = "4,split"
     ctrl.configuration.solve.opt_mode = "optN"
     with ProgramBuilder(ctrl) as b:
-        # All ASP files in the season dir
-        year_files = glob.glob(f"{season}/*.lp")
+        # Add season file
         parse_files(
-            ["scheduling-domain.lp"] + year_files,
+            ["scheduling-domain.lp", f"schedules/{season}.lp"],
         lambda ast: b.add(ast))
 
     # You can supply a bundle of geojson routes and we'll
@@ -114,7 +116,7 @@ def main(args):
     print("Starting grounding at", datetime.datetime.now())
     ctrl.ground([("base", [])], context=make_standard_func_ctx())
     if save_ground_model:
-        with open("program.lp", 'w') as f:
+        with open("program.lpx", 'w') as f:
             for atom in ctrl.symbolic_atoms:
                 f.write(f"{atom.symbol}.\n")
     solve_start_time = datetime.datetime.now()
@@ -131,10 +133,11 @@ def main(args):
         # may change its string representation in the future, and the facts for a solution depend on the Python
         # bindings for the predicates that we've specified.
         factbase_hash = xxhash.xxh64_hexdigest(facts.asp_str(sorted=True))
-        objective_names = list(facts.query(Objective).order_by(desc(Objective.index)).select(Objective.name).all())
+        objectives_by_priority = dict(
+            facts.query(Objective).order_by(desc(Objective.priority)).select(Objective.priority, Objective.name).all())
         schedule = extract_schedule(facts, args.distance_precision, args.duration_precision)
         print(schedule_to_str(schedule))
-        costs = dict((zip(objective_names, model.cost)))
+        costs = {objectives_by_priority[priority]: cost for priority, cost in zip(model.priority, model.cost)}
         print(costs)
         file_name = "solution"
         if save_all_models:
@@ -152,7 +155,6 @@ def main(args):
             "schedule": schedule,
             "hash": factbase_hash
         },
-            out_dir,
             solve_start_time, event_name, file_name, atoms=model.symbols(atoms=True))
 
         model_id += 1
@@ -164,15 +166,14 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    asp_subdir_paths = glob.glob("*/*.lp")
-    subdirs = set([str(pathlib.Path(p).parent) for p in asp_subdir_paths])
-    parser.add_argument("season", choices=subdirs, help="Path to directory containing season-specific .lp files")
+    seasons = set([str(p.name.split(".")[0]) for p in pathlib.Path("schedules/").glob("*.lp")])
+    parser.add_argument("season", choices=seasons, help="Season specific .lp files")
     parser.add_argument("routes_table", type=pathlib.Path, help="Path to YAML file of route data")
     parser.add_argument("routes_dir", type=pathlib.Path, help="Path to directory containing route geojson files")
     parser.add_argument("exchanges", type=pathlib.Path, help="Path to file containing exchange metadata")
     parser.add_argument("--out-dir", type=pathlib.Path, help="Path to directory to save solutions")
     parser.add_argument("--save-all-models", action="store_true", help="Save all (even non-optimal) models found while solving")
-    parser.add_argument("--save-ground-program", action="store_true", help="Store the ground program to 'program.lp'. Use to debug lengthy ground-times, and to see which rules cause your domain to grow")
+    parser.add_argument("--save-ground-program", action="store_true", help="Store the ground program to 'program.lpx'. Use to debug lengthy ground-times, and to see which rules cause your domain to grow")
     parser.add_argument("--distance-precision", default=2.0, type=float, help="Number of decimal places of fixed precision to convert distance terms to")
     # Not implemented yet. Consider implementing if using elevation/duration optimization criteria heavily and programs are too big.
     #parser.add_argument("--elevation-precision", default=0.0, type=float, help="Number of decimal places of fixed precision to convert elevation terms to")

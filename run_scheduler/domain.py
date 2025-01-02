@@ -135,7 +135,7 @@ class RouteName(Predicate):
 
 
 class Objective(Predicate):
-    index = IntegerField
+    priority = IntegerField
     name = StringField
 
 
